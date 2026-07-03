@@ -11,50 +11,29 @@ struct ThroughputChartView: View {
         let id = UUID()
         let timestamp: Date
         let value: Double
-        let series: Series
-
-        enum Series: String { case upload, download }
     }
 
     private var chartData: [ChartData] {
-        let maxInput = points.map(\.inputTokensPerSecond).max() ?? 100
-        let maxOutput = points.map(\.outputTokensPerSecond).max() ?? 100
-
-        return points.flatMap { p in
-            let uploadNorm = maxInput > 0 ? p.inputTokensPerSecond / maxInput : 0
-            let downloadNorm = maxOutput > 0 ? p.outputTokensPerSecond / maxOutput : 0
-            return [
-                ChartData(timestamp: p.timestamp, value: uploadNorm, series: .upload),
-                ChartData(timestamp: p.timestamp, value: -downloadNorm, series: .download)
-            ]
+        let maxVal = points.map(\.outputTokensPerSecond).max() ?? 100
+        return points.map {
+            ChartData(timestamp: $0.timestamp, value: $0.outputTokensPerSecond / maxVal)
         }
     }
 
-    private var maxInput: Double { points.map(\.inputTokensPerSecond).max() ?? 100 }
     private var maxOutput: Double { points.map(\.outputTokensPerSecond).max() ?? 100 }
-
-    private var yDomain: ClosedRange<Double> {
-        return -1.2...1.2
-    }
-
-    private var yAxisLabels: [Double] {
-        let inputSteps = [0.25, 0.5, 0.75, 1.0]
-        let outputSteps = [-0.25, -0.5, -0.75, -1.0]
-        return inputSteps.map { $0 } + outputSteps.map { $0 }
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
-                Image(systemName: "arrow.up.arrow.down")
+                Image(systemName: "speedometer")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                Text("Token Throughput")
+                Text("Generation Speed")
                     .font(.caption)
                     .fontWeight(.semibold)
                 Spacer()
                 if !points.isEmpty {
-                    Text("↑ \(Int(maxInput))/s  ↓ \(Int(maxOutput))/s")
+                    Text("Peak: \(Int(maxOutput))/s")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
@@ -66,8 +45,6 @@ struct ThroughputChartView: View {
             } else {
                 chartView
             }
-
-            legendView
         }
     }
 
@@ -76,7 +53,7 @@ struct ThroughputChartView: View {
             Rectangle()
                 .fill(Color.primary.opacity(0.03))
                 .frame(height: 120)
-            Text("Waiting for API activity...")
+            Text("Waiting for generation activity...")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -89,14 +66,10 @@ struct ThroughputChartView: View {
                 BarMark(
                     x: .value("Time", item.timestamp),
                     y: .value("Speed", item.value),
-                    width: .fixed(1)
+                    width: .fixed(2)
                 )
-                .foregroundStyle(
-                    item.series == .upload
-                        ? Color.blue.opacity(abs(item.value) > 0 ? 0.85 : 0.1)
-                        : Color.purple.opacity(abs(item.value) > 0 ? 0.85 : 0.1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 1.5))
+                .foregroundStyle(Color.purple.opacity(item.value > 0 ? 0.8 : 0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 1))
             }
         }
         .chartXScale(domain: xDomain)
@@ -106,18 +79,16 @@ struct ThroughputChartView: View {
             }
         }
         .chartYAxis {
-            AxisMarks(values: .automatic(desiredCount: 6)) { value in
+            AxisMarks(values: .automatic(desiredCount: 5)) { value in
                 AxisValueLabel {
                     if let v = value.as(Double.self) {
-                        let real = abs(v) * (v >= 0 ? maxInput : maxOutput)
-                        Text("\(Int(real))/s")
+                        Text("\(Int(v * maxOutput))/s")
                             .font(.caption2)
                     }
                 }
             }
         }
         .chartLegend(.hidden)
-        .chartYScale(domain: yDomain)
         .chartPlotStyle { plot in
             plot
                 .overlay(
@@ -169,19 +140,11 @@ struct ThroughputChartView: View {
             Text(pt.timestamp.formatted(.dateTime.hour().minute().second()))
                 .font(.caption2)
                 .foregroundColor(.secondary)
-            HStack(spacing: 8) {
-                HStack(spacing: 2) {
-                    Circle().fill(Color.blue).frame(width: 5, height: 5)
-                    Text("↑ \(Int(pt.inputTokensPerSecond))/s")
-                        .font(.caption2)
-                        .foregroundColor(.primary)
-                }
-                HStack(spacing: 2) {
-                    Circle().fill(Color.purple).frame(width: 5, height: 5)
-                    Text("↓ \(Int(pt.outputTokensPerSecond))/s")
-                        .font(.caption2)
-                        .foregroundColor(.primary)
-                }
+            HStack(spacing: 2) {
+                Circle().fill(Color.purple).frame(width: 5, height: 5)
+                Text("\(Int(pt.outputTokensPerSecond))/s")
+                    .font(.caption2)
+                    .foregroundColor(.primary)
             }
         }
         .padding(6)
@@ -196,23 +159,5 @@ struct ThroughputChartView: View {
 
     private func findNearest(to date: Date) -> ThroughputPoint? {
         points.min(by: { abs($0.timestamp.timeIntervalSince(date)) < abs($1.timestamp.timeIntervalSince(date)) })
-    }
-
-    private var legendView: some View {
-        HStack(spacing: 16) {
-            HStack(spacing: 4) {
-                Circle().fill(Color.blue).frame(width: 6, height: 6)
-                Text("Upload (input t/s)")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-            HStack(spacing: 4) {
-                Circle().fill(Color.purple).frame(width: 6, height: 6)
-                Text("Download (output t/s)")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-        }
-        .padding(.horizontal, 4)
     }
 }

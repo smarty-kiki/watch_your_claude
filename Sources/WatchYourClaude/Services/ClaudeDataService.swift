@@ -184,21 +184,29 @@ final class ClaudeDataService {
 
     // MARK: - Throughput computation
 
-    /// Computes throughput using the time between a user message and its first assistant response
-    /// as the request latency, rather than the gap between consecutive API calls.
+    /// Computes throughput per API response, measuring actual generation speed.
+    ///
+    /// Claude Code logs each API response multiple times in JSONL (one per internal consumer),
+    /// all sharing the same `parentUuid`. We group by `parentUuid` and use the time span
+    /// between the first and last duplicate as the streaming duration — this excludes
+    /// network round-trip and represents the model's token generation window.
     func computeThroughput(events: [TokenEvent], userTimestamps: [String: Date] = [:]) -> [ThroughputPoint] {
-        var points: [ThroughputPoint] = []
+        let grouped = Dictionary(grouping: events) { $0.parentUuid ?? "" }
 
-        for event in events {
-            guard let userTime = userTimestamps[event.parentUuid ?? ""] else { continue }
-            let latency = event.timestamp.timeIntervalSince(userTime)
-            guard latency > 0.05 else { continue }
+        var points: [ThroughputPoint] = []
+        for (_, group) in grouped {
+            guard let first = group.first,
+                  let userTime = userTimestamps[first.parentUuid ?? ""]
+            else { continue }
+
+            let outputTokens = group.reduce(0) { $0 + $1.outputTokens }
+            let streamingDuration = group.last!.timestamp.timeIntervalSince(first.timestamp)
+            guard streamingDuration > 0.05 else { continue }
 
             points.append(ThroughputPoint(
-                timestamp: event.timestamp,
-                inputTokensPerSecond: Double(event.totalInputTokens) / latency,
-                outputTokensPerSecond: Double(event.outputTokens) / latency,
-                model: event.model
+                timestamp: first.timestamp,
+                outputTokensPerSecond: Double(outputTokens) / streamingDuration,
+                model: first.model
             ))
         }
 
