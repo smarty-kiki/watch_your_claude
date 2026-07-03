@@ -6,6 +6,7 @@ struct ConsumptionChartView: View {
     @State private var grouping: Grouping = .byProject
     @State private var hoveredBucket: ConsumptionBucket?
     @State private var hoverX: CGFloat = 0
+    @State private var cachedStackedData: [BucketData] = []
 
     enum Grouping: String, CaseIterable {
         case byProject = "By Project"
@@ -48,6 +49,15 @@ struct ConsumptionChartView: View {
                 chartView
             }
         }
+        .onChange(of: buckets) { _, newBuckets in
+            recomputeStackedData(for: newBuckets)
+        }
+        .onChange(of: grouping) {
+            recomputeStackedData(for: buckets)
+        }
+        .onAppear {
+            recomputeStackedData(for: buckets)
+        }
     }
 
     private var emptyChart: some View {
@@ -72,7 +82,7 @@ struct ConsumptionChartView: View {
 
     private var chartView: some View {
         Chart {
-            ForEach(stackedData(), id: \.id) { item in
+            ForEach(cachedStackedData) { item in
                 BarMark(
                     x: .value("Time", item.startTime, unit: .minute),
                     y: .value("Tokens", item.inputTokens + item.outputTokens),
@@ -137,7 +147,7 @@ struct ConsumptionChartView: View {
 
     private func consumptionTooltip(for bucket: ConsumptionBucket) -> some View {
         let items: [(key: String, total: Int)] = {
-            let dict: [String: (input: Int, output: Int)]
+            let dict: [String: TokenCount]
             switch grouping {
             case .byProject: dict = bucket.projectTokens
             case .byModel: dict = bucket.modelTokens
@@ -179,19 +189,19 @@ struct ConsumptionChartView: View {
         return "\(count)"
     }
 
-    private func stackedData() -> [BucketData] {
+    private func recomputeStackedData(for buckets: [ConsumptionBucket]) {
         var result: [BucketData] = []
         for bucket in buckets {
-            let dict: [String: (input: Int, output: Int)]
+            let dict: [String: TokenCount]
             switch grouping {
             case .byProject:
                 dict = bucket.projectTokens
             case .byModel:
                 // Merge models with fewer tokens into "Other"
-                var merged: [String: (input: Int, output: Int)] = [:]
+                var merged: [String: TokenCount] = [:]
                 for (key, tokens) in bucket.modelTokens {
                     let short = modelShortName(key)
-                    var existing = merged[short] ?? (0, 0)
+                    var existing = merged[short] ?? TokenCount()
                     existing.input += tokens.input
                     existing.output += tokens.output
                     merged[short] = existing
@@ -208,7 +218,7 @@ struct ConsumptionChartView: View {
                 ))
             }
         }
-        return result
+        cachedStackedData = result
     }
 
     private func modelShortName(_ full: String) -> String {

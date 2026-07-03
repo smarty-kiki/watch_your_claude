@@ -87,26 +87,32 @@ final class SessionMonitor: ObservableObject {
     }
 
     private func refreshTokenData() {
-        // Throughput: scan all project directories for recent JSONL files
-        let lookback = Date().addingTimeInterval(-60 * 60)
-        let throughputResult = service.parseTokenEventsAndUserTimestamps(since: lookback)
-        throughputPoints = ThroughputPoint.maxBySecond(
-            service.computeThroughput(
-                events: throughputResult.events,
-                userTimestamps: throughputResult.userTimestamps
-            )
-        )
-        print("[WatchYourClaude] Throughput: \(throughputResult.events.count) events → \(throughputPoints.count) points")
+        Task(priority: .utility) {
+            let service = self.service
 
-        // Consumption: parse all events from last 3 hours
-        let threeHoursAgo = Date().addingTimeInterval(-3 * 3600)
-        let allHistoricalEvents = service.parseTokenEvents(since: threeHoursAgo)
-        consumptionBuckets = service.computeConsumptionBuckets(
-            events: allHistoricalEvents,
-            bucketMinutes: 10,
-            lookbackHours: 3
-        )
-        print("[WatchYourClaude] Consumption: \(allHistoricalEvents.count) events → \(consumptionBuckets.count) buckets")
+            let throughputResult = service.parseTokenEventsAndUserTimestamps(since: Date().addingTimeInterval(-60 * 60))
+            let throughputPoints = ThroughputPoint.maxBySecond(
+                service.computeThroughput(
+                    events: throughputResult.events,
+                    userTimestamps: throughputResult.userTimestamps
+                )
+            )
+
+            let threeHoursAgo = Date().addingTimeInterval(-3 * 3600)
+            let allHistoricalEvents = service.parseTokenEvents(since: threeHoursAgo)
+            let consumptionBuckets = service.computeConsumptionBuckets(
+                events: allHistoricalEvents,
+                bucketMinutes: 10,
+                lookbackHours: 3
+            )
+
+            await MainActor.run {
+                self.throughputPoints = throughputPoints
+                self.consumptionBuckets = consumptionBuckets
+                print("[WatchYourClaude] Throughput: \(throughputResult.events.count) events → \(throughputPoints.count) points")
+                print("[WatchYourClaude] Consumption: \(allHistoricalEvents.count) events → \(consumptionBuckets.count) buckets")
+            }
+        }
     }
 
     private func playNotificationSound() {

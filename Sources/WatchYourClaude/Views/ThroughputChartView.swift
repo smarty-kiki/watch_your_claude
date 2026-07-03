@@ -6,21 +6,14 @@ struct ThroughputChartView: View {
 
     @State private var hoveredPoint: ThroughputPoint?
     @State private var hoverX: CGFloat = 0
+    @State private var cachedChartData: [ChartData] = []
+    @State private var cachedMaxOutput: Double = 100
 
     private struct ChartData: Identifiable {
         let id = UUID()
         let timestamp: Date
         let value: Double
     }
-
-    private var chartData: [ChartData] {
-        let maxVal = points.map(\.outputTokensPerSecond).max() ?? 100
-        return points.map {
-            ChartData(timestamp: $0.timestamp, value: $0.outputTokensPerSecond / maxVal)
-        }
-    }
-
-    private var maxOutput: Double { points.map(\.outputTokensPerSecond).max() ?? 100 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -33,7 +26,7 @@ struct ThroughputChartView: View {
                     .fontWeight(.semibold)
                 Spacer()
                 if !points.isEmpty {
-                    Text("Peak: \(Int(maxOutput))/s")
+                    Text("Peak: \(Int(cachedMaxOutput))/s")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
@@ -44,6 +37,20 @@ struct ThroughputChartView: View {
                 emptyChart
             } else {
                 chartView
+            }
+        }
+        .onChange(of: points) { _, newPoints in
+            let maxVal = newPoints.map(\.outputTokensPerSecond).max() ?? 100
+            cachedMaxOutput = maxVal
+            cachedChartData = newPoints.map {
+                ChartData(timestamp: $0.timestamp, value: $0.outputTokensPerSecond / maxVal)
+            }
+        }
+        .onAppear {
+            let maxVal = points.map(\.outputTokensPerSecond).max() ?? 100
+            cachedMaxOutput = maxVal
+            cachedChartData = points.map {
+                ChartData(timestamp: $0.timestamp, value: $0.outputTokensPerSecond / maxVal)
             }
         }
     }
@@ -62,7 +69,7 @@ struct ThroughputChartView: View {
 
     private var chartView: some View {
         Chart {
-            ForEach(chartData) { item in
+            ForEach(cachedChartData) { item in
                 BarMark(
                     x: .value("Time", item.timestamp),
                     y: .value("Speed", item.value),
@@ -82,7 +89,7 @@ struct ThroughputChartView: View {
             AxisMarks(values: .automatic(desiredCount: 5)) { value in
                 AxisValueLabel {
                     if let v = value.as(Double.self) {
-                        Text("\(Int(v * maxOutput))/s")
+                        Text("\(Int(v * cachedMaxOutput))/s")
                             .font(.caption2)
                     }
                 }

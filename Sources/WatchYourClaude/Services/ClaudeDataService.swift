@@ -196,7 +196,7 @@ final class ClaudeDataService {
         var points: [ThroughputPoint] = []
         for (_, group) in grouped {
             guard let first = group.first,
-                  let userTime = userTimestamps[first.parentUuid ?? ""]
+                  userTimestamps[first.parentUuid ?? ""] != nil
             else { continue }
 
             let outputTokens = group.reduce(0) { $0 + $1.outputTokens }
@@ -245,12 +245,12 @@ final class ClaudeDataService {
             let modelKey = event.model
             let inputTotal = event.totalInputTokens
 
-            var proj = buckets[idx].projectTokens[projectKey] ?? (0, 0)
+            var proj = buckets[idx].projectTokens[projectKey] ?? TokenCount()
             proj.input += inputTotal
             proj.output += event.outputTokens
             buckets[idx].projectTokens[projectKey] = proj
 
-            var mdl = buckets[idx].modelTokens[modelKey] ?? (0, 0)
+            var mdl = buckets[idx].modelTokens[modelKey] ?? TokenCount()
             mdl.input += inputTotal
             mdl.output += event.outputTokens
             buckets[idx].modelTokens[modelKey] = mdl
@@ -410,11 +410,18 @@ final class ClaudeDataService {
         return result
     }
 
+    private static let iso8601Formatters: [ISO8601DateFormatter] = {
+        var withFractional = ISO8601DateFormatter()
+        withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var withoutFractional = ISO8601DateFormatter()
+        withoutFractional.formatOptions = [.withInternetDateTime]
+        return [withFractional, withoutFractional]
+    }()
+
     private func iso8601Parse(_ str: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: str) { return date }
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: str)
+        for formatter in Self.iso8601Formatters {
+            if let date = formatter.date(from: str) { return date }
+        }
+        return nil
     }
 }

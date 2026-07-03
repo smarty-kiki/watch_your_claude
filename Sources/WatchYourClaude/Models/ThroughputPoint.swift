@@ -1,7 +1,7 @@
 import Foundation
 
 /// A single throughput data point — one API response's generation speed.
-struct ThroughputPoint: Identifiable {
+struct ThroughputPoint: Identifiable, Equatable {
     let id = UUID()
     let timestamp: Date
     let outputTokensPerSecond: Double
