@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#16213e"/>
+    </linearGradient>
+    <linearGradient id="cGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FF6B35"/>
+      <stop offset="100%" stop-color="#E85D26"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="185" fill="url(#bg)"/>
+
+  <!-- Pulse rings -->
+  <circle cx="512" cy="512" r="340" fill="none" stroke="#FF6B35" stroke-width="24" opacity="0.15"/>
+  <circle cx="512" cy="512" r="280" fill="none" stroke="#FF6B35" stroke-width="20" opacity="0.2"/>
+
+  <!-- Signal wave (listening indicator) -->
+  <polyline points="350,540 400,540 430,480 470,560 500,500 530,540 560,540 590,460 620,540 674,540"
+    fill="none" stroke="#FF6B35" stroke-width="36" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+
+  <!-- Claude-style "C" letter -->
+  <path d="M340,340 A172,172 0 1,0 684,512"
+    fill="none" stroke="url(#cGrad)" stroke-width="64" stroke-linecap="round"/>
+</svg>
