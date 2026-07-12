@@ -93,16 +93,34 @@ struct ConsumptionChartView: View {
         }
         .chartXScale(domain: xDomain)
         .chartXAxis {
-            AxisMarks(values: .stride(by: .minute, count: 30)) { _ in
+            AxisMarks(values: .stride(by: .minute, count: 30)) { value in
                 AxisGridLine()
                 AxisTick()
-                AxisValueLabel(format: .dateTime.hour().minute())
+                if let date = value.as(Date.self), date.timeIntervalSinceNow > -300 {
+                    AxisValueLabel("now")
+                } else {
+                    AxisValueLabel(format: .dateTime.hour().minute())
+                }
             }
         }
         .chartYAxis {
-            AxisMarks { _ in
-                AxisValueLabel()
+            AxisMarks { value in
+                AxisValueLabel {
+                    if let v = value.as(Double.self) {
+                        Text(formatTokenCount(v))
+                            .font(.caption2)
+                    }
+                }
             }
+        }
+        .chartPlotStyle { plot in
+            plot
+                .overlay(
+                    Rectangle()
+                        .frame(height: 1)
+                        .foregroundColor(.secondary.opacity(0.3)),
+                    alignment: .bottom
+                )
         }
         .chartForegroundStyleScale(range: [
             .blue, .purple, .orange, .green, .pink, .teal, .yellow, .red, .mint, .indigo
@@ -167,7 +185,7 @@ struct ConsumptionChartView: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .frame(maxWidth: 90, alignment: .leading)
-                    Text(formatTokens(item.total))
+                    Text(formatTokenCount(Double(item.total)))
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
@@ -184,9 +202,18 @@ struct ConsumptionChartView: View {
         .cornerRadius(5)
     }
 
-    private func formatTokens(_ count: Int) -> String {
-        if count >= 1000 { return "\(count / 1000)k" }
-        return "\(count)"
+    private func formatTokenCount(_ count: Double) -> String {
+        let absCount = abs(count)
+        if absCount >= 1_000_000_000 {
+            return String(format: "%.1fg", count / 1_000_000_000)
+        }
+        if absCount >= 1_000_000 {
+            return String(format: "%.1fm", count / 1_000_000)
+        }
+        if absCount >= 1_000 {
+            return String(format: "%.0fk", count / 1_000)
+        }
+        return String(format: "%.0f", count)
     }
 
     private func recomputeStackedData(for buckets: [ConsumptionBucket]) {

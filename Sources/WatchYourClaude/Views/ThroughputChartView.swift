@@ -6,27 +6,55 @@ struct ThroughputChartView: View {
 
     @State private var hoveredPoint: ThroughputPoint?
     @State private var hoverX: CGFloat = 0
-    @State private var cachedChartData: [ChartData] = []
-    @State private var cachedMaxOutput: Double = 100
 
     private struct ChartData: Identifiable {
         let id = UUID()
         let timestamp: Date
         let value: Double
+        let series: Series
+
+        enum Series: String { case upload, download }
+    }
+
+    private var chartData: [ChartData] {
+        let maxInput = points.map(\.inputTokensPerSecond).max() ?? 100
+        let maxOutput = points.map(\.outputTokensPerSecond).max() ?? 100
+
+        return points.flatMap { p in
+            let uploadNorm = maxInput > 0 ? p.inputTokensPerSecond / maxInput : 0
+            let downloadNorm = maxOutput > 0 ? p.outputTokensPerSecond / maxOutput : 0
+            return [
+                ChartData(timestamp: p.timestamp, value: uploadNorm, series: .upload),
+                ChartData(timestamp: p.timestamp, value: -downloadNorm, series: .download)
+            ]
+        }
+    }
+
+    private var maxInput: Double { points.map(\.inputTokensPerSecond).max() ?? 100 }
+    private var maxOutput: Double { points.map(\.outputTokensPerSecond).max() ?? 100 }
+
+    private var yDomain: ClosedRange<Double> {
+        return -1.2...1.2
+    }
+
+    private var yAxisLabels: [Double] {
+        let inputSteps = [0.25, 0.5, 0.75, 1.0]
+        let outputSteps = [-0.25, -0.5, -0.75, -1.0]
+        return inputSteps.map { $0 } + outputSteps.map { $0 }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
-                Image(systemName: "speedometer")
+                Image(systemName: "arrow.up.arrow.down")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                Text("Generation Speed")
+                Text("Token Throughput (1h)")
                     .font(.caption)
                     .fontWeight(.semibold)
                 Spacer()
                 if !points.isEmpty {
-                    Text("Peak: \(Int(cachedMaxOutput))/s")
+                    Text("↑ \(Int(maxInput))/s  ↓ \(Int(maxOutput))/s")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
@@ -38,20 +66,8 @@ struct ThroughputChartView: View {
             } else {
                 chartView
             }
-        }
-        .onChange(of: points) { _, newPoints in
-            let maxVal = newPoints.map(\.outputTokensPerSecond).max() ?? 100
-            cachedMaxOutput = maxVal
-            cachedChartData = newPoints.map {
-                ChartData(timestamp: $0.timestamp, value: $0.outputTokensPerSecond / maxVal)
-            }
-        }
-        .onAppear {
-            let maxVal = points.map(\.outputTokensPerSecond).max() ?? 100
-            cachedMaxOutput = maxVal
-            cachedChartData = points.map {
-                ChartData(timestamp: $0.timestamp, value: $0.outputTokensPerSecond / maxVal)
-            }
+
+            legendView
         }
     }
 
@@ -60,7 +76,7 @@ struct ThroughputChartView: View {
             Rectangle()
                 .fill(Color.primary.opacity(0.03))
                 .frame(height: 120)
-            Text("Waiting for generation activity...")
+            Text("Waiting for API activity...")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -69,33 +85,43 @@ struct ThroughputChartView: View {
 
     private var chartView: some View {
         Chart {
-            ForEach(cachedChartData) { item in
+            ForEach(chartData) { item in
                 BarMark(
                     x: .value("Time", item.timestamp),
                     y: .value("Speed", item.value),
-                    width: .fixed(2)
+                    width: .fixed(1)
                 )
-                .foregroundStyle(Color.purple.opacity(item.value > 0 ? 0.8 : 0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 1))
+                .foregroundStyle(
+                    item.series == .upload
+                        ? Color.blue.opacity(abs(item.value) > 0 ? 0.85 : 0.1)
+                        : Color.purple.opacity(abs(item.value) > 0 ? 0.85 : 0.1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 1.5))
             }
         }
         .chartXScale(domain: xDomain)
         .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 5)) { _ in
-                AxisValueLabel(format: .dateTime.hour().minute())
+            AxisMarks(values: .automatic(desiredCount: 5)) { value in
+                if let date = value.as(Date.self), date.timeIntervalSinceNow > -15 {
+                    AxisValueLabel("now")
+                } else {
+                    AxisValueLabel(format: .dateTime.hour().minute())
+                }
             }
         }
         .chartYAxis {
-            AxisMarks(values: .automatic(desiredCount: 5)) { value in
+            AxisMarks(values: .automatic(desiredCount: 6)) { value in
                 AxisValueLabel {
                     if let v = value.as(Double.self) {
-                        Text("\(Int(v * cachedMaxOutput))/s")
+                        let real = abs(v) * (v >= 0 ? maxInput : maxOutput)
+                        Text("\(Int(real))/s")
                             .font(.caption2)
                     }
                 }
             }
         }
         .chartLegend(.hidden)
+        .chartYScale(domain: yDomain)
         .chartPlotStyle { plot in
             plot
                 .overlay(
@@ -147,11 +173,19 @@ struct ThroughputChartView: View {
             Text(pt.timestamp.formatted(.dateTime.hour().minute().second()))
                 .font(.caption2)
                 .foregroundColor(.secondary)
-            HStack(spacing: 2) {
-                Circle().fill(Color.purple).frame(width: 5, height: 5)
-                Text("\(Int(pt.outputTokensPerSecond))/s")
-                    .font(.caption2)
-                    .foregroundColor(.primary)
+            HStack(spacing: 8) {
+                HStack(spacing: 2) {
+                    Circle().fill(Color.blue).frame(width: 5, height: 5)
+                    Text("↑ \(Int(pt.inputTokensPerSecond))/s")
+                        .font(.caption2)
+                        .foregroundColor(.primary)
+                }
+                HStack(spacing: 2) {
+                    Circle().fill(Color.purple).frame(width: 5, height: 5)
+                    Text("↓ \(Int(pt.outputTokensPerSecond))/s")
+                        .font(.caption2)
+                        .foregroundColor(.primary)
+                }
             }
         }
         .padding(6)
@@ -166,5 +200,23 @@ struct ThroughputChartView: View {
 
     private func findNearest(to date: Date) -> ThroughputPoint? {
         points.min(by: { abs($0.timestamp.timeIntervalSince(date)) < abs($1.timestamp.timeIntervalSince(date)) })
+    }
+
+    private var legendView: some View {
+        HStack(spacing: 16) {
+            HStack(spacing: 4) {
+                Circle().fill(Color.blue).frame(width: 6, height: 6)
+                Text("Upload (input t/s)")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            HStack(spacing: 4) {
+                Circle().fill(Color.purple).frame(width: 6, height: 6)
+                Text("Download (output t/s)")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(.horizontal, 4)
     }
 }

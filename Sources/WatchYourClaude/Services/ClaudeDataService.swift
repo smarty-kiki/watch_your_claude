@@ -47,7 +47,6 @@ final class ClaudeDataService {
                       let startedAtMs = raw["startedAt"] as? Double,
                       let updatedAtMs = raw["updatedAt"] as? Double
                 else {
-                    print("[WatchYourClaude] Failed to parse session file: \(file.lastPathComponent)")
                     continue
                 }
 
@@ -65,9 +64,7 @@ final class ClaudeDataService {
                 ))
                 seenIds.insert(sessionId)
             }
-        } else {
-            print("[WatchYourClaude] Cannot read sessions dir: \(Self.claudeSessionsDir.path)")
-        }
+        } else { return sessions.sorted { $0.updatedAt > $1.updatedAt } }
 
         // 2) Scan JSONL files as fallback (some Claude Code versions don't write session JSON)
         guard let projectDirs = try? FileManager.default.contentsOfDirectory(
@@ -104,7 +101,6 @@ final class ClaudeDataService {
             }
         }
 
-        print("[WatchYourClaude] Found \(sessions.count) active session(s)")
         return sessions.sorted { $0.updatedAt > $1.updatedAt }
     }
 
@@ -116,8 +112,6 @@ final class ClaudeDataService {
         return events
     }
 
-    /// Returns both assistant token events and a map of user event UUID → timestamp,
-    /// so throughput can be computed using request latency (user msg → first assistant response).
     func parseTokenEventsAndUserTimestamps(since: Date) -> (events: [TokenEvent], userTimestamps: [String: Date]) {
         var allEvents: [TokenEvent] = []
         var userTimestamps: [String: Date] = [:]
@@ -167,12 +161,6 @@ final class ClaudeDataService {
             .appendingPathComponent(projectDir)
             .appendingPathComponent("\(sessionId).jsonl")
 
-        let exists = FileManager.default.fileExists(atPath: fileURL.path)
-        if !exists {
-            print("[WatchYourClaude] JSONL not found: \(fileURL.path)")
-            print("[WatchYourClaude]   encoded dir: \(projectDir)")
-        }
-
         return parseSessionJSONL(
             at: fileURL,
             since: Date.distantPast,
@@ -191,22 +179,18 @@ final class ClaudeDataService {
     /// between the first and last duplicate as the streaming duration — this excludes
     /// network round-trip and represents the model's token generation window.
     func computeThroughput(events: [TokenEvent], userTimestamps: [String: Date] = [:]) -> [ThroughputPoint] {
-        let grouped = Dictionary(grouping: events) { $0.parentUuid ?? "" }
-
         var points: [ThroughputPoint] = []
-        for (_, group) in grouped {
-            guard let first = group.first,
-                  userTimestamps[first.parentUuid ?? ""] != nil
-            else { continue }
 
-            let outputTokens = group.reduce(0) { $0 + $1.outputTokens }
-            let streamingDuration = group.last!.timestamp.timeIntervalSince(first.timestamp)
-            guard streamingDuration > 0.05 else { continue }
+        for event in events {
+            guard let userTime = userTimestamps[event.parentUuid ?? ""] else { continue }
+            let latency = event.timestamp.timeIntervalSince(userTime)
+            guard latency > 0.05 else { continue }
 
             points.append(ThroughputPoint(
-                timestamp: first.timestamp,
-                outputTokensPerSecond: Double(outputTokens) / streamingDuration,
-                model: first.model
+                timestamp: event.timestamp,
+                inputTokensPerSecond: Double(event.totalInputTokens) / latency,
+                outputTokensPerSecond: Double(event.outputTokens) / latency,
+                model: event.model
             ))
         }
 
@@ -423,5 +407,22 @@ final class ClaudeDataService {
             if let date = formatter.date(from: str) { return date }
         }
         return nil
+    }
+
+    private static func log(_ format: String, _ args: CVarArg...) {
+        let message = String(format: format, arguments: args)
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let line = "[\(timestamp)] \(message)\n"
+        let url = URL(fileURLWithPath: "/tmp/watchyourclaude_debug.log")
+        if let data = line.data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: url.path),
+               let handle = try? FileHandle(forWritingTo: url) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                handle.closeFile()
+            } else {
+                try? data.write(to: url)
+            }
+        }
     }
 }

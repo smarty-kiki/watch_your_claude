@@ -23,34 +23,162 @@ final class SessionMonitor: ObservableObject {
 
     // MARK: - Private
 
-    private let service = ClaudeDataService()
-    private var statusTimer: Timer?
-    private var tokenTimer: Timer?
+    nonisolated private let service = ClaudeDataService()
+    private var sessionsDirSource: DispatchSourceFileSystemObject?
+    private var projectsDirSource: DispatchSourceFileSystemObject?
+    private var jsonlFileSources: [URL: DispatchSourceFileSystemObject] = [:]
     private var lastConsumptionMtimes: [URL: Date] = [:]
     private var previousSessionBusy: [String: Bool] = [:]
     private var audioPlayer: AVAudioPlayer?
+    private var fallbackTimer: Timer?
+    private var refreshDebounceTask: Task<Void, Never>?
 
     // MARK: - Lifecycle
 
     init() {
-        print("[WatchYourClaude] SessionMonitor init — starting timers")
+        setupDirectoryWatchers()
+        scanAndWatchNewJsonlFiles()
         refreshSessionStatus()
         refreshTokenData()
-        statusTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        fallbackTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.refreshSessionStatus()
-            }
-        }
-        tokenTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
                 self?.refreshTokenData()
             }
         }
     }
 
     deinit {
-        statusTimer?.invalidate()
-        tokenTimer?.invalidate()
+        sessionsDirSource?.cancel()
+        projectsDirSource?.cancel()
+        for (_, source) in jsonlFileSources {
+            source.cancel()
+        }
+        jsonlFileSources.removeAll()
+        fallbackTimer?.invalidate()
+        refreshDebounceTask?.cancel()
+    }
+
+    // MARK: - Directory Watchers
+
+    private func setupDirectoryWatchers() {
+        setupSessionsDirWatcher()
+        setupProjectsDirWatcher()
+    }
+
+    private func setupSessionsDirWatcher() {
+        let dirURL = ClaudeDataService.claudeSessionsDir
+        guard FileManager.default.fileExists(atPath: dirURL.path) else { return }
+
+        let fd = open(dirURL.path, O_EVTONLY)
+        guard fd >= 0 else { return }
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .delete, .extend],
+            queue: DispatchQueue.global(qos: .utility)
+        )
+
+        source.setEventHandler { [weak self] in
+            self?.debouncedRefresh()
+        }
+
+        source.setCancelHandler {
+            close(fd)
+        }
+
+        source.resume()
+        self.sessionsDirSource = source
+    }
+
+    private func setupProjectsDirWatcher() {
+        let dirURL = ClaudeDataService.claudeProjectsDir
+        guard FileManager.default.fileExists(atPath: dirURL.path) else { return }
+
+        let fd = open(dirURL.path, O_EVTONLY)
+        guard fd >= 0 else { return }
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .delete, .extend],
+            queue: DispatchQueue.global(qos: .utility)
+        )
+
+        source.setEventHandler { [weak self] in
+            self?.debouncedRefresh()
+        }
+
+        source.setCancelHandler {
+            close(fd)
+        }
+
+        source.resume()
+        self.projectsDirSource = source
+    }
+
+    private func scanAndWatchNewJsonlFiles() {
+        guard let projectDirs = try? FileManager.default.contentsOfDirectory(
+            at: ClaudeDataService.claudeProjectsDir,
+            includingPropertiesForKeys: nil
+        ) else { return }
+
+        for projDir in projectDirs where projDir.hasDirectoryPath {
+            guard let sessionFiles = try? FileManager.default.contentsOfDirectory(
+                at: projDir,
+                includingPropertiesForKeys: nil
+            ) else { continue }
+
+            for file in sessionFiles where file.pathExtension == "jsonl" {
+                if jsonlFileSources[file] == nil {
+                    watchJsonlFile(file)
+                }
+            }
+        }
+    }
+
+    private func watchJsonlFile(_ url: URL) {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+
+        let fd = open(url.path, O_EVTONLY)
+        guard fd >= 0 else { return }
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .delete, .extend],
+            queue: DispatchQueue.global(qos: .utility)
+        )
+
+        source.setEventHandler { [weak self] in
+            if !FileManager.default.fileExists(atPath: url.path) {
+                self?.jsonlFileSources.removeValue(forKey: url)
+                return
+            }
+            self?.debouncedRefresh()
+        }
+
+        source.setCancelHandler {
+            close(fd)
+        }
+
+        source.resume()
+        jsonlFileSources[url] = source
+    }
+
+    // MARK: - Debounced Refresh
+
+    private func debouncedRefresh() {
+        refreshDebounceTask?.cancel()
+        refreshDebounceTask = Task { [weak self] in
+            guard let self = self else { return }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                self.scanAndWatchNewJsonlFiles()
+                self.refreshSessionStatus()
+            }
+            self.refreshTokenData()
+        }
     }
 
     // MARK: - Refresh
@@ -77,7 +205,6 @@ final class SessionMonitor: ObservableObject {
                 }
                 previousSessionBusy[session.id] = session.isBusy
             }
-            // Clean up entries for sessions that no longer exist
             for id in previousSessionBusy.keys {
                 if !sessions.contains(where: { $0.id == id }) {
                     previousSessionBusy.removeValue(forKey: id)
@@ -87,7 +214,8 @@ final class SessionMonitor: ObservableObject {
     }
 
     private func refreshTokenData() {
-        Task(priority: .utility) {
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self = self else { return }
             let service = self.service
 
             let throughputResult = service.parseTokenEventsAndUserTimestamps(since: Date().addingTimeInterval(-60 * 60))
@@ -97,7 +225,6 @@ final class SessionMonitor: ObservableObject {
                     userTimestamps: throughputResult.userTimestamps
                 )
             )
-
             let threeHoursAgo = Date().addingTimeInterval(-3 * 3600)
             let allHistoricalEvents = service.parseTokenEvents(since: threeHoursAgo)
             let consumptionBuckets = service.computeConsumptionBuckets(
@@ -109,8 +236,6 @@ final class SessionMonitor: ObservableObject {
             await MainActor.run {
                 self.throughputPoints = throughputPoints
                 self.consumptionBuckets = consumptionBuckets
-                print("[WatchYourClaude] Throughput: \(throughputResult.events.count) events → \(throughputPoints.count) points")
-                print("[WatchYourClaude] Consumption: \(allHistoricalEvents.count) events → \(consumptionBuckets.count) buckets")
             }
         }
     }
