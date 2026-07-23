@@ -32,6 +32,11 @@ final class SessionMonitor: ObservableObject {
     private var audioPlayer: AVAudioPlayer?
     private var fallbackTimer: Timer?
     private var refreshDebounceTask: Task<Void, Never>?
+    private var cachedConsumptionBuckets: [ConsumptionBucket] = []
+    private var lastConsumptionParseTime: Date?
+    private var cachedThroughputPoints: [ThroughputPoint] = []
+    private var cachedUserTimestamps: [String: Date] = [:]
+    private var lastThroughputParseTime: Date?
 
     // MARK: - Lifecycle
 
@@ -218,24 +223,100 @@ final class SessionMonitor: ObservableObject {
             guard let self = self else { return }
             let service = self.service
 
-            let throughputResult = service.parseTokenEventsAndUserTimestamps(since: Date().addingTimeInterval(-60 * 60))
-            let throughputPoints = ThroughputPoint.maxBySecond(
-                service.computeThroughput(
-                    events: throughputResult.events,
-                    userTimestamps: throughputResult.userTimestamps
-                )
-            )
+            let oneHourAgo = Date().addingTimeInterval(-3600)
+            let throughputResult = service.parseTokenEventsAndUserTimestamps(since: oneHourAgo)
             let threeHoursAgo = Date().addingTimeInterval(-3 * 3600)
-            let allHistoricalEvents = service.parseTokenEvents(since: threeHoursAgo)
-            let consumptionBuckets = service.computeConsumptionBuckets(
-                events: allHistoricalEvents,
-                bucketMinutes: 10,
-                lookbackHours: 3
-            )
 
             await MainActor.run {
+                let throughputPoints: [ThroughputPoint]
+                if self.cachedThroughputPoints.isEmpty {
+                    self.cachedUserTimestamps = throughputResult.userTimestamps
+                    let points = ThroughputPoint.maxBySecond(
+                        service.computeThroughput(events: throughputResult.events, userTimestamps: throughputResult.userTimestamps)
+                    )
+                    self.cachedThroughputPoints = points
+                    self.lastThroughputParseTime = Date()
+                    throughputPoints = points
+                } else {
+                    let since: Date
+                    if let last = self.lastThroughputParseTime {
+                        since = Date(timeIntervalSince1970: last.timeIntervalSince1970.rounded(.down))
+                    } else {
+                        since = oneHourAgo
+                    }
+                    let newResult = service.parseTokenEventsAndUserTimestamps(since: since)
+                    self.cachedUserTimestamps.merge(newResult.userTimestamps, uniquingKeysWith: { $1 })
+
+                    let incrementalPoints = ThroughputPoint.maxBySecond(
+                        service.computeThroughput(events: newResult.events, userTimestamps: self.cachedUserTimestamps)
+                    )
+
+                    var combined = self.cachedThroughputPoints
+                    let existingSeconds = Set(combined.map { $0.timestamp.timeIntervalSince1970.rounded(.down) })
+                    for point in incrementalPoints {
+                        let key = point.timestamp.timeIntervalSince1970.rounded(.down)
+                        if !existingSeconds.contains(key) {
+                            combined.append(point)
+                        }
+                    }
+                    combined.sort { $0.timestamp < $1.timestamp }
+
+                    let cutoff = Date().addingTimeInterval(-3600)
+                    combined = combined.filter { $0.timestamp >= cutoff }
+
+                    self.cachedThroughputPoints = combined
+                    self.lastThroughputParseTime = Date()
+                    throughputPoints = combined
+                }
+
+                let consumptionEvents = service.parseTokenEvents(since: threeHoursAgo)
+
+                let newBuckets: [ConsumptionBucket]
+                if self.cachedConsumptionBuckets.isEmpty {
+                    let allBuckets = service.computeConsumptionBuckets(
+                        events: consumptionEvents,
+                        bucketMinutes: 10,
+                        lookbackHours: 3
+                    )
+                    self.cachedConsumptionBuckets = allBuckets
+                    self.lastConsumptionParseTime = consumptionEvents.last?.timestamp
+                    newBuckets = allBuckets
+                } else {
+                    let bucketCount = self.cachedConsumptionBuckets.count
+                    let bucketSeconds = TimeInterval(10 * 60)
+                    let expectedStart = ClaudeDataService.alignedBucketAnchor()
+                        .addingTimeInterval(-TimeInterval(bucketCount) * bucketSeconds)
+                    let drift = abs(expectedStart.timeIntervalSince(self.cachedConsumptionBuckets.first?.startTime ?? expectedStart))
+
+                    if drift > bucketSeconds {
+                        let allBuckets = service.computeConsumptionBuckets(
+                            events: consumptionEvents,
+                            bucketMinutes: 10,
+                            lookbackHours: 3
+                        )
+                        self.cachedConsumptionBuckets = allBuckets
+                        self.lastConsumptionParseTime = consumptionEvents.last?.timestamp
+                        newBuckets = allBuckets
+                    } else {
+                        let since: Date
+                        if let last = self.lastConsumptionParseTime {
+                            since = Date(timeIntervalSince1970: last.timeIntervalSince1970.rounded(.down))
+                        } else {
+                            since = threeHoursAgo
+                        }
+                        let newEvents = service.parseTokenEvents(since: since)
+                        let currentBucket = service.computeCurrentConsumptionBucket(
+                            events: newEvents,
+                            bucketMinutes: 10
+                        )
+                        self.cachedConsumptionBuckets[self.cachedConsumptionBuckets.count - 1] = currentBucket
+                        self.lastConsumptionParseTime = newEvents.last?.timestamp
+                        newBuckets = self.cachedConsumptionBuckets
+                    }
+                }
+
                 self.throughputPoints = throughputPoints
-                self.consumptionBuckets = consumptionBuckets
+                self.consumptionBuckets = newBuckets
             }
         }
     }

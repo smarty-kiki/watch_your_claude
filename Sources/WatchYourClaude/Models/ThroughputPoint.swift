@@ -16,8 +16,8 @@ struct ThroughputPoint: Identifiable {
             guard let first = group.first else { return nil }
             return ThroughputPoint(
                 timestamp: first.timestamp,
-                inputTokensPerSecond: group.map(\.inputTokensPerSecond).max() ?? 0,
-                outputTokensPerSecond: group.map(\.outputTokensPerSecond).max() ?? 0,
+                inputTokensPerSecond: group.map(\.inputTokensPerSecond).reduce(0, +),
+                outputTokensPerSecond: group.map(\.outputTokensPerSecond).reduce(0, +),
                 model: first.model
             )
         }.sorted { $0.timestamp < $1.timestamp }

@@ -199,16 +199,17 @@ final class ClaudeDataService {
 
     // MARK: - Consumption buckets
 
-    /// Groups token events into fixed-duration buckets.
+    /// Groups token events into fixed-duration buckets, aligned to clock boundaries.
     func computeConsumptionBuckets(
         events: [TokenEvent],
         bucketMinutes: Int = 10,
         lookbackHours: Int = 3
     ) -> [ConsumptionBucket] {
-        let now = Date()
         let bucketSeconds = TimeInterval(bucketMinutes * 60)
         let lookbackSeconds = TimeInterval(lookbackHours * 3600)
-        let startTime = now.addingTimeInterval(-lookbackSeconds)
+
+        let anchor = Self.alignedBucketAnchor(bucketMinutes: bucketMinutes)
+        let startTime = anchor.addingTimeInterval(-lookbackSeconds)
 
         let bucketCount = Int(ceil(lookbackSeconds / bucketSeconds))
         var buckets: [ConsumptionBucket] = (0..<bucketCount).map { i in
@@ -219,7 +220,14 @@ final class ClaudeDataService {
             )
         }
 
+        var seenParentUuids = Set<String>()
         for event in events {
+            if let puid = event.parentUuid, !seenParentUuids.contains(puid) {
+                seenParentUuids.insert(puid)
+            } else if let puid = event.parentUuid, seenParentUuids.contains(puid) {
+                continue
+            }
+
             let offset = event.timestamp.timeIntervalSince(startTime)
             guard offset >= 0 else { continue }
             let idx = Int(offset / bucketSeconds)
@@ -241,6 +249,63 @@ final class ClaudeDataService {
         }
 
         return buckets
+    }
+
+    /// Computes only the current consumption bucket (latest time window) from events.
+    /// Used for incremental updates — historical buckets are cached and unchanged.
+    func computeCurrentConsumptionBucket(
+        events: [TokenEvent],
+        bucketMinutes: Int = 10
+    ) -> ConsumptionBucket {
+        let bucketStart = Self.alignedBucketAnchor(bucketMinutes: bucketMinutes)
+
+        var projTokens: [String: TokenCount] = [:]
+        var mdlTokens: [String: TokenCount] = [:]
+        var seenParentUuids = Set<String>()
+
+        for event in events {
+            if let puid = event.parentUuid, !seenParentUuids.contains(puid) {
+                seenParentUuids.insert(puid)
+            } else if let puid = event.parentUuid, seenParentUuids.contains(puid) {
+                continue
+            }
+
+            guard event.timestamp >= bucketStart else { continue }
+            let inputTotal = event.totalInputTokens
+
+            var proj = projTokens[event.projectName] ?? TokenCount()
+            proj.input += inputTotal
+            proj.output += event.outputTokens
+            projTokens[event.projectName] = proj
+
+            var mdl = mdlTokens[event.model] ?? TokenCount()
+            mdl.input += inputTotal
+            mdl.output += event.outputTokens
+            mdlTokens[event.model] = mdl
+        }
+
+        return ConsumptionBucket(
+            startTime: bucketStart,
+            endTime: bucketStart.addingTimeInterval(TimeInterval(bucketMinutes * 60)),
+            projectTokens: projTokens,
+            modelTokens: mdlTokens
+        )
+    }
+
+    /// Returns the start of the current 10-minute aligned block in UTC.
+    /// JSONL timestamps are UTC, so bucket boundaries must also be UTC.
+    static func alignedBucketAnchor(bucketMinutes: Int = 10) -> Date {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = Date()
+        let comps = cal.dateComponents([.year, .month, .day, .hour, .minute, .second], from: now)
+        let minute = comps.minute ?? 0
+        let alignedMinute = (minute / bucketMinutes) * bucketMinutes
+        let alignedComps = DateComponents(
+            year: comps.year, month: comps.month, day: comps.day,
+            hour: comps.hour, minute: alignedMinute, second: 0, nanosecond: 0
+        )
+        return cal.date(from: alignedComps) ?? now
     }
 
     // MARK: - Private helpers
