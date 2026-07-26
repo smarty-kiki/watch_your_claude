@@ -184,7 +184,7 @@ final class ClaudeDataService {
         for event in events {
             guard let userTime = userTimestamps[event.parentUuid ?? ""] else { continue }
             let latency = event.timestamp.timeIntervalSince(userTime)
-            guard latency > 0.05 else { continue }
+            guard latency > 0.02 else { continue }
 
             points.append(ThroughputPoint(
                 timestamp: event.timestamp,
