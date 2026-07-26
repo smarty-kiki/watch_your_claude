@@ -77,7 +77,8 @@ struct ConsumptionChartView: View {
             let now = Date()
             return now.addingTimeInterval(-3 * 3600)...now
         }
-        return first...first.addingTimeInterval(3 * 3600)
+        // Pad the right edge so the last bar (14pt wide) doesn't clip against the y-axis
+        return first...first.addingTimeInterval(3 * 3600 + 1200)
     }
 
     private var chartView: some View {
