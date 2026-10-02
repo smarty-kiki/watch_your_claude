@@ -64,5 +64,9 @@ PLIST
 sips -z 512 512 "$APP_DIR/Contents/Resources/icon.png" --out "$APP_DIR/Contents/Resources/icon_512.png" > /dev/null 2>&1
 cp "$PROJECT_DIR/icon.icns" "$APP_DIR/Contents/Resources/icon.icns"
 
+# Ad-hoc sign the whole bundle: without it, a quarantined (downloaded) app
+# fails Gatekeeper's bundle check and macOS reports it as "damaged"
+codesign --force --deep --sign - "$APP_DIR"
+
 echo "Done! App at: $APP_DIR"
 echo "Open with: open $APP_DIR"

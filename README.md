@@ -10,11 +10,18 @@ A macOS menu bar app for real-time monitoring of Claude Code sessions, token thr
 
 Grab the latest `WatchYourClaude-<version>.zip` from the [Releases page](https://github.com/smarty-kiki/watch_your_claude/releases), unzip, and drag `WatchYourClaude.app` to your Applications folder.
 
-The app is not codesigned, so macOS Gatekeeper may block it on first launch. Clear the quarantine flag once:
+The app is ad-hoc signed but not notarized (no Apple Developer certificate), so Gatekeeper blocks the first launch:
+
+1. Try to open the app once — macOS says it "cannot verify the developer"
+2. Open **System Settings → Privacy & Security**, find the blocked app message, and click **Open Anyway**
+
+Or clear the quarantine flag once, then open normally:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/WatchYourClaude.app
 ```
+
+> If a release downloaded before v0.1.2 reports the app as "damaged", use the `xattr` command above — those builds were not signed at bundle level.
 
 ## What It Does
 
