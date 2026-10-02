@@ -19,16 +19,23 @@ jobs:
       - name: Package app bundle
         run: bash package_app.sh --release
 
-      - name: Zip app bundle
+      - name: Package zip and DMG
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           ditto -c -k --keepParent WatchYourClaude.app "WatchYourClaude-${VERSION}.zip"
-          ls -lh "WatchYourClaude-${VERSION}.zip"
+          STAGING="$(mktemp -d)"
+          cp -R WatchYourClaude.app "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create -volname "WatchYourClaude" -srcfolder "$STAGING" -format UDZO -ov "WatchYourClaude-${VERSION}.dmg"
+          rm -rf "$STAGING"
+          ls -lh WatchYourClaude-*.zip WatchYourClaude-*.dmg
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: WatchYourClaude-*.zip
+          files: |
+            WatchYourClaude-*.zip
+            WatchYourClaude-*.dmg
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
