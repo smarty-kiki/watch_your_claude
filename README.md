@@ -1,6 +1,20 @@
 # WatchYourClaude
 
+[![CI](https://github.com/smarty-kiki/watch_your_claude/actions/workflows/ci.yml/badge.svg)](https://github.com/smarty-kiki/watch_your_claude/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/smarty-kiki/watch_your_claude?include_prereleases)](https://github.com/smarty-kiki/watch_your_claude/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A macOS menu bar app for real-time monitoring of Claude Code sessions, token throughput, and API consumption.
+
+## Download
+
+Grab the latest `WatchYourClaude-<version>.zip` from the [Releases page](https://github.com/smarty-kiki/watch_your_claude/releases), unzip, and drag `WatchYourClaude.app` to your Applications folder.
+
+The app is not codesigned, so macOS Gatekeeper may block it on first launch. Clear the quarantine flag once:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/WatchYourClaude.app
+```
 
 ## What It Does
 
@@ -62,3 +76,22 @@ Sources/WatchYourClaude/
     ├── icon.png
     └── notification.wav
 ```
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions, commit conventions, and the PR checklist.
+
+## Releasing (maintainers)
+
+Releases are built automatically by [GitHub Actions](.github/workflows/release.yml). Cut a release by pushing a tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow builds the app in release mode, attaches `WatchYourClaude-<version>.zip` to the release, and generates release notes from commit history. Tags with a prerelease suffix (e.g. `v0.2.0-beta.1`) are marked as prereleases.
+
+## License
+
+[MIT](LICENSE)

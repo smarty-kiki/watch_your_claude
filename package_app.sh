@@ -5,12 +5,18 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$SCRIPT_DIR"
-BUILD_DIR="$PROJECT_DIR/.build/arm64-apple-macosx/debug"
 APP_DIR="$PROJECT_DIR/WatchYourClaude.app"
 
-echo "Building..."
+# Usage: bash package_app.sh [--release]
+CONFIG="debug"
+if [[ "${1:-}" == "--release" || "${1:-}" == "release" ]]; then
+  CONFIG="release"
+fi
+
+echo "Building ($CONFIG)..."
 cd "$PROJECT_DIR"
-swift build
+swift build -c "$CONFIG"
+BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
 
 # Clean old app
 rm -rf "$APP_DIR"
@@ -20,7 +26,7 @@ mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
 
 # Copy binary
-cp "$BUILD_DIR/WatchYourClaude" "$APP_DIR/Contents/MacOS/WatchYourClaude"
+cp "$BIN_DIR/WatchYourClaude" "$APP_DIR/Contents/MacOS/WatchYourClaude"
 
 # Copy resources
 cp "$PROJECT_DIR/Sources/WatchYourClaude/Resources/notification.wav" "$APP_DIR/Contents/Resources/"

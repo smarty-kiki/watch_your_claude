@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: Build (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build release binary
+        run: swift build -c release
+
+      - name: Package app bundle
+        run: bash package_app.sh --release
+
+      - name: Verify bundle layout
+        run: |
+          test -x WatchYourClaude.app/Contents/MacOS/WatchYourClaude
+          test -f WatchYourClaude.app/Contents/Info.plist
+          test -f WatchYourClaude.app/Contents/Resources/icon.icns
