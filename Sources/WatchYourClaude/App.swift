@@ -19,7 +19,7 @@ struct WatchYourClaudeApp: App {
     }
 
     private func setAppIcon() {
-        guard let url = Bundle.module.url(forResource: "icon", withExtension: "png"),
+        guard let url = AppResources.url(forResource: "icon", withExtension: "png"),
               let image = NSImage(contentsOf: url) else { return }
         NSApplication.shared.applicationIconImage = image
     }

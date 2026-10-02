@@ -28,7 +28,8 @@ mkdir -p "$APP_DIR/Contents/Resources"
 # Copy binary
 cp "$BIN_DIR/WatchYourClaude" "$APP_DIR/Contents/MacOS/WatchYourClaude"
 
-# Copy resources
+# Loose runtime resources readable via Bundle.main (see AppResources.swift for
+# why the SPM resource bundle is deliberately not used in the packaged app)
 cp "$PROJECT_DIR/Sources/WatchYourClaude/Resources/notification.wav" "$APP_DIR/Contents/Resources/"
 cp "$PROJECT_DIR/Sources/WatchYourClaude/Resources/icon.png" "$APP_DIR/Contents/Resources/"
 

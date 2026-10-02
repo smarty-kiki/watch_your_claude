@@ -322,7 +322,7 @@ final class SessionMonitor: ObservableObject {
     }
 
     private func playNotificationSound() {
-        guard let url = Bundle.module.url(forResource: "notification", withExtension: "wav") else {
+        guard let url = AppResources.url(forResource: "notification", withExtension: "wav") else {
             NSSound.beep()
             return
         }
